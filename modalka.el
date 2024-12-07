@@ -75,20 +75,33 @@ This variable is considered when Modalka is enabled globally via
 (defun modalka-define-key (actual-key target-key)
   "Register translation from ACTUAL-KEY to TARGET-KEY."
   (define-key
-    modalka-mode-map
-    actual-key
-    (defalias (make-symbol "modalka-translation")
-      (lambda ()
-        (interactive)
-        (let ((binding (key-binding target-key)))
-          (unless (or (memq binding '(nil undefined))
-                      (keymapp binding))
-            (call-interactively binding)
-            (setq this-command binding))))
-      `(format "This command translates %s into %s, which calls `%s'."
-               (key-description ,actual-key)
-               (key-description ,target-key)
-               (key-binding     ,target-key)))))
+   modalka-mode-map
+   actual-key
+   (defalias (make-symbol "modalka-translation")
+     (lambda ()
+       (interactive)
+       (let ((binding (if (functionp target-key)
+			  (let ((dynamic-binding (funcall target-key)))
+			    (cond ((stringp dynamic-binding) (key-binding (kbd dynamic-binding)))
+				  ((commandp dynamic-binding) dynamic-binding)
+				  ((eq dynamic-binding nil) nil)
+				  (t (error "Wrong dynamic binding"))))
+			(key-binding target-key))))
+	 (unless (or (memq binding '(nil undefined))
+                     (keymapp binding))
+	   (call-interactively binding)
+           (setq this-command binding))))
+     `(pcase-let ((`(,target-key-description ,target-key-command)
+		   (cond ((functionp (quote ,target-key))
+			  (list (symbol-name (quote ,target-key))
+				(symbol-name (quote ,target-key))))
+			 ((stringp ,target-key)
+			  (list (key-description ,target-key) (key-binding ,target-key)))
+			 (t (list "UNKNOWN" "UNKNOWN")))))
+	(format "This command translates %s into %s, which calls `%s'."
+		(key-description ,actual-key)
+		target-key-description
+		target-key-command)))))
 
 ;;;###autoload
 (defun modalka-define-kbd (actual-kbd target-kbd)
@@ -96,7 +109,9 @@ This variable is considered when Modalka is enabled globally via
 
 The arguments are accepted in the format that is used for saving
 keyboard macros (see `edmacro-mode')."
-  (modalka-define-key (kbd actual-kbd) (kbd target-kbd)))
+  (modalka-define-key (kbd actual-kbd) (if (functionp target-kbd)
+					   target-kbd
+					   (kbd target-kbd))))
 
 ;;;###autoload
 (defun modalka-remove-key (key)
